@@ -67,6 +67,8 @@ def load_data():
 
 
 def insert_contacts(df):
+    init_db()
+
     missing = [column for column in CONTACT_COLUMNS if column not in df.columns]
     if missing:
         raise ValueError(f"Missing columns: {missing}")
