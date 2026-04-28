@@ -25,10 +25,12 @@ DRAFTS_DIR = Path(__file__).parent / "drafts"
 API_URL = "http://127.0.0.1:8000/contacts"
 MODEL = "llama-3.3-70b-versatile"
 
-ACTION_BADGE = {
-    "Follow-up needed": "[!]",
-    "Check-in needed": "[~]",
-    None: "[OK]",
+LEAD_LABELS = {
+    "Hot Lead": "Hot Lead",
+    "Warm Lead": "Warm Lead",
+    "Cold Lead": "Cold Lead",
+    "Active Deal": "Active Lead",
+    "Lost": "Lost",
 }
 
 REQUIRED_COLUMNS = [
@@ -65,6 +67,10 @@ def classify_contact(row: pd.Series) -> str | None:
     if stage == "Cold Lead":
         return "Follow-up needed" if days > THRESHOLD_COLD else None
     return None
+
+
+def label_contact(row: pd.Series) -> str:
+    return LEAD_LABELS.get(row["deal_stage"], row["deal_stage"])
 
 
 def build_prompt(contact: pd.Series) -> str:
@@ -178,7 +184,7 @@ if missing:
 
 df = df.copy()
 df["action"] = df.apply(classify_contact, axis=1)
-df["status"] = df["action"].map(lambda action: ACTION_BADGE.get(action, ""))
+df["lead_label"] = df.apply(label_contact, axis=1)
 
 flagged_df = df[df["action"].notna()].reset_index(drop=True)
 ok_df = df[df["action"].isna() & (df["deal_stage"] != "Lost")].reset_index(drop=True)
@@ -197,7 +203,7 @@ if flagged_df.empty:
     st.success("All contacts are up to date.")
 else:
     display_cols = [
-        "status",
+        "lead_label",
         "name",
         "deal_stage",
         "last_contact_days_ago",
@@ -208,7 +214,7 @@ else:
     st.dataframe(
         flagged_df[display_cols].rename(
             columns={
-                "status": "",
+                "lead_label": "Lead Label",
                 "name": "Name",
                 "deal_stage": "Stage",
                 "last_contact_days_ago": "Days Ago",
@@ -243,7 +249,7 @@ else:
         st.caption("Or generate drafts one at a time:")
         for _, row in flagged_df.iterrows():
             with st.expander(
-                f"{ACTION_BADGE.get(row['action'])} {row['name']} - "
+                f"{row['lead_label']} - {row['name']} - "
                 f"{row['deal_stage']} ({int(row['last_contact_days_ago'])} days ago)"
             ):
                 col_a, col_b = st.columns([2, 1])
@@ -270,10 +276,10 @@ else:
 
 with st.expander("All Contacts"):
     all_display = df[
-        ["status", "name", "deal_stage", "last_contact_days_ago", "property_interest", "budget"]
+        ["lead_label", "name", "deal_stage", "last_contact_days_ago", "property_interest", "budget"]
     ].rename(
         columns={
-            "status": "",
+            "lead_label": "Lead Label",
             "name": "Name",
             "deal_stage": "Stage",
             "last_contact_days_ago": "Days Ago",
