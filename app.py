@@ -54,6 +54,14 @@ def get_default_api_key() -> str:
         return ""
 
 
+def is_streamlit_cloud() -> bool:
+    return (
+        os.getenv("STREAMLIT_CLOUD", "").lower() == "true"
+        or os.getenv("STREAMLIT_SHARING_MODE", "").lower() == "streamlit_cloud"
+        or str(Path.home()) == "/home/appuser"
+    )
+
+
 def classify_contact(row: pd.Series) -> str | None:
     stage = row["deal_stage"]
     days = int(row["last_contact_days_ago"])
@@ -100,13 +108,13 @@ def load_contacts(uploaded, use_api: bool) -> pd.DataFrame:
     if uploaded:
         return pd.read_csv(uploaded)
 
-    if use_api:
+    if use_api and not is_streamlit_cloud():
         try:
             response = requests.get(API_URL, timeout=2)
             response.raise_for_status()
             return pd.DataFrame(response.json())
-        except requests.RequestException as exc:
-            st.warning(f"API unavailable. Loading local database instead. ({exc})")
+        except requests.RequestException:
+            pass
 
     return ensure_seed_data()
 
@@ -157,11 +165,14 @@ with st.sidebar:
     st.divider()
     st.header("Data Source")
     uploaded = st.file_uploader("Upload a contacts CSV", type="csv")
-    use_api = st.checkbox(
-        "Use local FastAPI server",
-        value=False,
-        help="For local development only. Streamlit Cloud should use upload or the seeded SQLite data.",
-    )
+    if is_streamlit_cloud():
+        use_api = False
+    else:
+        use_api = st.checkbox(
+            "Use local FastAPI server",
+            value=False,
+            help="For local development only. Streamlit Cloud uses upload or the seeded SQLite data.",
+        )
 
     st.divider()
     st.markdown(
