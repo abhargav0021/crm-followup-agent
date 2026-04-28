@@ -40,6 +40,31 @@ Serves contacts at `http://127.0.0.1:8000/contacts`.
 For a cloud deployment, host this FastAPI app separately and set `CONTACTS_API_URL`
 to the public `/contacts` endpoint.
 
+API endpoints:
+
+```bash
+GET  /contacts     # list contacts
+PUT  /contacts     # replace all contacts with a JSON array
+POST /contacts     # add one contact
+```
+
+Example:
+
+```bash
+curl -X PUT "$CONTACTS_API_URL" \
+  -H "Content-Type: application/json" \
+  -d '[{
+    "name": "Taylor Reed",
+    "email": "taylor@example.com",
+    "phone": "918-555-0100",
+    "property_interest": "Single family home",
+    "budget": 325000,
+    "last_contact_days_ago": 35,
+    "deal_stage": "Hot Lead",
+    "notes": "Wants South Tulsa schools"
+  }]'
+```
+
 ### Streamlit UI
 
 ```bash
@@ -47,6 +72,10 @@ streamlit run app.py
 ```
 
 Upload a CSV, use the local FastAPI server, or fall back to the seeded SQLite database. Generate all drafts at once or one at a time with live streaming output.
+
+When **Use FastAPI server** is checked, uploading a CSV also shows a
+**Save Uploaded CSV to API** button. That replaces the API contact list with
+the uploaded CSV rows.
 
 ### Deploy to Streamlit Community Cloud
 

@@ -35,6 +35,8 @@ LEAD_LABELS = {
 
 REQUIRED_COLUMNS = [
     "name",
+    "email",
+    "phone",
     "deal_stage",
     "last_contact_days_ago",
     "property_interest",
@@ -138,6 +140,24 @@ def load_contacts(uploaded, use_api: bool) -> pd.DataFrame:
     return ensure_seed_data()
 
 
+def save_contacts_to_api(df: pd.DataFrame) -> None:
+    missing = [column for column in REQUIRED_COLUMNS if column not in df.columns]
+    if missing:
+        st.error(f"CSV is missing columns: {missing}")
+        return
+
+    payload = df[REQUIRED_COLUMNS].to_dict(orient="records")
+    try:
+        response = requests.put(get_contacts_api_url(), json=payload, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        st.error(f"Could not save contacts to API. ({exc})")
+        return
+
+    count = response.json().get("count", len(payload))
+    st.success(f"Saved {count} contact(s) to the API.")
+
+
 def stream_email(contact: pd.Series, api_key: str) -> str:
     client = Groq(api_key=api_key)
     placeholder = st.empty()
@@ -191,6 +211,9 @@ with st.sidebar:
     )
     if use_api:
         st.caption(f"Contacts API: `{get_contacts_api_url()}`")
+        if uploaded and st.button("Save Uploaded CSV to API"):
+            save_contacts_to_api(pd.read_csv(uploaded))
+            uploaded.seek(0)
 
     st.divider()
     st.markdown(
