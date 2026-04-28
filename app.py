@@ -136,8 +136,9 @@ def load_contacts(uploaded, use_api: bool) -> pd.DataFrame:
             return pd.DataFrame(response.json())
         except requests.RequestException as exc:
             st.warning(f"API unavailable. Loading seeded data instead. ({exc})")
+            return ensure_seed_data()
 
-    return ensure_seed_data()
+    return pd.DataFrame()
 
 
 def save_contacts_to_api(df: pd.DataFrame) -> None:
@@ -226,7 +227,6 @@ with st.sidebar:
 df = load_contacts(uploaded, use_api)
 
 if df.empty:
-    st.warning("No contacts loaded.")
     st.stop()
 
 missing = [column for column in REQUIRED_COLUMNS if column not in df.columns]
