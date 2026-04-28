@@ -22,7 +22,7 @@ THRESHOLD_ACTIVE_DEAL = CONFIG["active_threshold"]
 load_dotenv()
 
 DRAFTS_DIR = Path(__file__).parent / "drafts"
-API_URL = "http://127.0.0.1:8000/contacts"
+DEFAULT_API_URL = "http://127.0.0.1:8000/contacts"
 MODEL = "llama-3.3-70b-versatile"
 
 LEAD_LABELS = {
@@ -60,6 +60,17 @@ def is_streamlit_cloud() -> bool:
         or os.getenv("STREAMLIT_SHARING_MODE", "").lower() == "streamlit_cloud"
         or str(Path.home()) == "/home/appuser"
     )
+
+
+def get_contacts_api_url() -> str:
+    env_url = os.getenv("CONTACTS_API_URL", "")
+    if env_url:
+        return env_url
+
+    try:
+        return st.secrets.get("CONTACTS_API_URL", "")
+    except (FileNotFoundError, KeyError):
+        return DEFAULT_API_URL
 
 
 def classify_contact(row: pd.Series) -> str | None:
@@ -108,13 +119,21 @@ def load_contacts(uploaded, use_api: bool) -> pd.DataFrame:
     if uploaded:
         return pd.read_csv(uploaded)
 
-    if use_api and not is_streamlit_cloud():
+    if use_api:
+        api_url = get_contacts_api_url()
+        if is_streamlit_cloud() and api_url == DEFAULT_API_URL:
+            st.warning(
+                "FastAPI needs a public URL on Streamlit Cloud. Add CONTACTS_API_URL "
+                "in Streamlit secrets, then this option will load contacts from the API."
+            )
+            return ensure_seed_data()
+
         try:
-            response = requests.get(API_URL, timeout=2)
+            response = requests.get(api_url, timeout=5)
             response.raise_for_status()
             return pd.DataFrame(response.json())
-        except requests.RequestException:
-            pass
+        except requests.RequestException as exc:
+            st.warning(f"API unavailable. Loading seeded data instead. ({exc})")
 
     return ensure_seed_data()
 
@@ -165,14 +184,13 @@ with st.sidebar:
     st.divider()
     st.header("Data Source")
     uploaded = st.file_uploader("Upload a contacts CSV", type="csv")
-    if is_streamlit_cloud():
-        use_api = False
-    else:
-        use_api = st.checkbox(
-            "Use local FastAPI server",
-            value=False,
-            help="For local development only. Streamlit Cloud uses upload or the seeded SQLite data.",
-        )
+    use_api = st.checkbox(
+        "Use FastAPI server",
+        value=False,
+        help="Uses local FastAPI by default. On Streamlit Cloud, set CONTACTS_API_URL to a hosted API.",
+    )
+    if use_api:
+        st.caption(f"Contacts API: `{get_contacts_api_url()}`")
 
     st.divider()
     st.markdown(

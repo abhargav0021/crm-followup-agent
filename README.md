@@ -37,6 +37,9 @@ uvicorn api:app --reload
 
 Serves contacts at `http://127.0.0.1:8000/contacts`.
 
+For a cloud deployment, host this FastAPI app separately and set `CONTACTS_API_URL`
+to the public `/contacts` endpoint.
+
 ### Streamlit UI
 
 ```bash
@@ -54,11 +57,14 @@ Upload a CSV, use the local FastAPI server, or fall back to the seeded SQLite da
 
 ```toml
 GROQ_API_KEY = "your_groq_api_key_here"
+CONTACTS_API_URL = "https://your-fastapi-app.example.com/contacts"
 ```
 
 5. Deploy the app.
 
-On Streamlit Cloud, leave **Use local FastAPI server** unchecked. The deployed app can use an uploaded CSV or the included seeded data.
+On Streamlit Cloud, **Use FastAPI server** works only when `CONTACTS_API_URL`
+points to a public FastAPI deployment. Without that URL, the app falls back to
+an uploaded CSV or the included seeded data.
 
 ## Follow-up Rules
 
