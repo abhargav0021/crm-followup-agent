@@ -147,12 +147,26 @@ def save_contacts_to_api(df: pd.DataFrame) -> None:
         st.error(f"CSV is missing columns: {missing}")
         return
 
-    payload = df[REQUIRED_COLUMNS].to_dict(orient="records")
+    contacts = df[REQUIRED_COLUMNS].copy()
+    contacts["budget"] = pd.to_numeric(contacts["budget"], errors="coerce").fillna(0).astype(int)
+    contacts["last_contact_days_ago"] = (
+        pd.to_numeric(contacts["last_contact_days_ago"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+    contacts = contacts.fillna("")
+    payload = contacts.to_dict(orient="records")
     try:
         response = requests.put(get_contacts_api_url(), json=payload, timeout=10)
         response.raise_for_status()
     except requests.RequestException as exc:
-        st.error(f"Could not save contacts to API. ({exc})")
+        detail = ""
+        if getattr(exc, "response", None) is not None:
+            try:
+                detail = f" {exc.response.json().get('detail', '')}"
+            except ValueError:
+                detail = f" {exc.response.text}"
+        st.error(f"Could not save contacts to API. ({exc}){detail}")
         return
 
     count = response.json().get("count", len(payload))

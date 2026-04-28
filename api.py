@@ -15,6 +15,13 @@ class Contact(BaseModel):
     deal_stage: str
     notes: str = ""
 
+
+def contact_to_dict(contact: Contact) -> dict:
+    if hasattr(contact, "model_dump"):
+        return contact.model_dump()
+    return contact.dict()
+
+
 app = FastAPI()
 
 @app.get("/")
@@ -30,17 +37,23 @@ def get_contacts():
 @app.put("/contacts")
 def replace_contacts(contacts: list[Contact]):
     try:
-        df = pd.DataFrame([contact.model_dump() for contact in contacts])
+        df = pd.DataFrame([contact_to_dict(contact) for contact in contacts])
         insert_contacts(df)
         return {"message": "Contacts replaced", "count": len(contacts)}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not save contacts: {exc}") from exc
 
 
 @app.post("/contacts")
 def add_contact(contact: Contact):
-    df = load_data()
-    next_row = pd.DataFrame([contact.model_dump()])
-    combined = pd.concat([df, next_row], ignore_index=True)
-    insert_contacts(combined[CONTACT_COLUMNS])
-    return {"message": "Contact added", "contact": contact.model_dump()}
+    try:
+        contact_data = contact_to_dict(contact)
+        df = load_data()
+        next_row = pd.DataFrame([contact_data])
+        combined = pd.concat([df, next_row], ignore_index=True)
+        insert_contacts(combined[CONTACT_COLUMNS])
+        return {"message": "Contact added", "contact": contact_data}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not add contact: {exc}") from exc
