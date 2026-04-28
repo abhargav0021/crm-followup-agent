@@ -1,0 +1,8 @@
+.env
+drafts/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+crm.db
+.streamlit/secrets.toml

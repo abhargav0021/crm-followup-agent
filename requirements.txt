@@ -2,3 +2,6 @@ groq
 pandas
 streamlit
 python-dotenv
+fastapi
+uvicorn
+requests

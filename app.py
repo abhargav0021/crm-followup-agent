@@ -1,30 +1,55 @@
-"""
-CRM Follow-up Agent — Streamlit UI
-"""
-
 import os
 from pathlib import Path
 
 import pandas as pd
+import requests
 import streamlit as st
 from dotenv import load_dotenv
 from groq import Groq
 
+from database import ensure_seed_data
+
+CONFIG = {
+    "hot_warm_threshold": 30,
+    "cold_threshold": 60,
+    "active_threshold": 14,
+}
+
+THRESHOLD_HOT_WARM = CONFIG["hot_warm_threshold"]
+THRESHOLD_COLD = CONFIG["cold_threshold"]
+THRESHOLD_ACTIVE_DEAL = CONFIG["active_threshold"]
+
 load_dotenv()
 
-CSV_PATH = Path(__file__).parent / "contacts.csv"
 DRAFTS_DIR = Path(__file__).parent / "drafts"
+API_URL = "http://127.0.0.1:8000/contacts"
 MODEL = "llama-3.3-70b-versatile"
 
-THRESHOLD_HOT_WARM = 30
-THRESHOLD_COLD = 60
-THRESHOLD_ACTIVE_DEAL = 14
-
 ACTION_BADGE = {
-    "Follow-up needed": "🔴",
-    "Check-in needed": "🟡",
-    None: "✅",
+    "Follow-up needed": "[!]",
+    "Check-in needed": "[~]",
+    None: "[OK]",
 }
+
+REQUIRED_COLUMNS = [
+    "name",
+    "deal_stage",
+    "last_contact_days_ago",
+    "property_interest",
+    "budget",
+    "notes",
+]
+
+
+def get_default_api_key() -> str:
+    env_key = os.getenv("GROQ_API_KEY", "")
+    if env_key:
+        return env_key
+
+    try:
+        return st.secrets.get("GROQ_API_KEY", "")
+    except (FileNotFoundError, KeyError):
+        return ""
 
 
 def classify_contact(row: pd.Series) -> str | None:
@@ -55,8 +80,8 @@ Draft a personalized follow-up email for this client:
 
 Write a warm, professional email that:
 1. Opens with a personal touch tied to their specific situation
-2. Includes one brief, relevant Tulsa market insight (inventory, rates, or a local neighborhood note)
-3. Proposes one clear next step (call, showing, document review, etc.)
+2. Includes one brief, relevant Tulsa market insight
+3. Proposes one clear next step
 4. Stays under 180 words in the body
 
 Format your output as:
@@ -65,8 +90,23 @@ Subject: <subject line>
 <email body>"""
 
 
-def stream_email(contact: pd.Series) -> str:
-    client = Groq(api_key=st.session_state.api_key)
+def load_contacts(uploaded, use_api: bool) -> pd.DataFrame:
+    if uploaded:
+        return pd.read_csv(uploaded)
+
+    if use_api:
+        try:
+            response = requests.get(API_URL, timeout=2)
+            response.raise_for_status()
+            return pd.DataFrame(response.json())
+        except requests.RequestException as exc:
+            st.warning(f"API unavailable. Loading local database instead. ({exc})")
+
+    return ensure_seed_data()
+
+
+def stream_email(contact: pd.Series, api_key: str) -> str:
+    client = Groq(api_key=api_key)
     placeholder = st.empty()
     full_text = ""
 
@@ -76,6 +116,7 @@ def stream_email(contact: pd.Series) -> str:
         max_tokens=600,
         stream=True,
     )
+
     for chunk in stream:
         text = chunk.choices[0].delta.content or ""
         full_text += text
@@ -87,46 +128,34 @@ def stream_email(contact: pd.Series) -> str:
 
 def save_draft(name: str, content: str) -> Path:
     DRAFTS_DIR.mkdir(exist_ok=True)
-    parts = name.split()
-    first = parts[0]
-    last = parts[-1] if len(parts) > 1 else parts[0]
-    path = DRAFTS_DIR / f"{first}_{last}.txt"
+    path = DRAFTS_DIR / f"{name.replace(' ', '_')}.txt"
     path.write_text(content)
     return path
 
 
-# ── Page setup ─────────────────────────────────────────────────────────────
-
-st.set_page_config(page_title="CRM Follow-up Agent", page_icon="🏠", layout="wide")
+st.set_page_config(page_title="CRM Follow-up Agent", layout="wide")
 st.title("CRM Follow-up Agent")
-st.caption("AI-powered outreach for Tulsa real estate contacts · powered by Groq")
-
-# ── Sidebar ─────────────────────────────────────────────────────────────────
+st.caption("AI-powered outreach for Tulsa real estate contacts")
 
 with st.sidebar:
     st.header("Settings")
 
-    api_key_env = os.getenv("GROQ_API_KEY", "")
-    api_key_input = st.text_input(
+    api_key = st.text_input(
         "Groq API Key",
-        value=api_key_env,
+        value=get_default_api_key(),
         type="password",
-        help="Loaded from .env if present",
+        help="Loaded from Streamlit secrets or .env if present",
     )
-    st.session_state.api_key = api_key_input
     st.caption(f"Model: `{MODEL}`")
 
     st.divider()
     st.header("Data Source")
     uploaded = st.file_uploader("Upload a contacts CSV", type="csv")
-    if uploaded:
-        st.session_state.df = pd.read_csv(uploaded)
-        st.success(f"Loaded {len(st.session_state.df)} contacts from upload.")
-    elif "df" not in st.session_state:
-        if CSV_PATH.exists():
-            st.session_state.df = pd.read_csv(CSV_PATH)
-        else:
-            st.session_state.df = pd.DataFrame()
+    use_api = st.checkbox(
+        "Use local FastAPI server",
+        value=False,
+        help="For local development only. Streamlit Cloud should use upload or the seeded SQLite data.",
+    )
 
     st.divider()
     st.markdown(
@@ -136,52 +165,58 @@ with st.sidebar:
         f"- Active Deal: >{THRESHOLD_ACTIVE_DEAL} days"
     )
 
-# ── Load data ────────────────────────────────────────────────────────────────
-
-df: pd.DataFrame = st.session_state.get("df", pd.DataFrame())
+df = load_contacts(uploaded, use_api)
 
 if df.empty:
-    st.warning("No contacts loaded. Upload a CSV or ensure contacts.csv exists.")
+    st.warning("No contacts loaded.")
     st.stop()
 
-# ── Annotate dataframe ───────────────────────────────────────────────────────
+missing = [column for column in REQUIRED_COLUMNS if column not in df.columns]
+if missing:
+    st.error(f"Missing columns: {missing}")
+    st.stop()
 
 df = df.copy()
 df["action"] = df.apply(classify_contact, axis=1)
-df["status"] = df["action"].map(lambda a: ACTION_BADGE.get(a, ""))
+df["status"] = df["action"].map(lambda action: ACTION_BADGE.get(action, ""))
 
 flagged_df = df[df["action"].notna()].reset_index(drop=True)
 ok_df = df[df["action"].isna() & (df["deal_stage"] != "Lost")].reset_index(drop=True)
 lost_df = df[df["deal_stage"] == "Lost"].reset_index(drop=True)
 
-# ── Metrics row ──────────────────────────────────────────────────────────────
-
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Total Contacts", len(df))
-col2.metric("Need Action", len(flagged_df), delta=f"{len(flagged_df)} contacts", delta_color="inverse")
+col2.metric("Need Action", len(flagged_df))
 col3.metric("Up to Date", len(ok_df))
 col4.metric("Lost", len(lost_df))
 
 st.divider()
-
-# ── Contacts needing action ───────────────────────────────────────────────────
-
 st.subheader("Contacts Needing Action")
 
 if flagged_df.empty:
     st.success("All contacts are up to date.")
 else:
-    display_cols = ["status", "name", "deal_stage", "last_contact_days_ago", "property_interest", "budget", "action"]
+    display_cols = [
+        "status",
+        "name",
+        "deal_stage",
+        "last_contact_days_ago",
+        "property_interest",
+        "budget",
+        "action",
+    ]
     st.dataframe(
-        flagged_df[display_cols].rename(columns={
-            "status": "",
-            "name": "Name",
-            "deal_stage": "Stage",
-            "last_contact_days_ago": "Days Ago",
-            "property_interest": "Interest",
-            "budget": "Budget ($)",
-            "action": "Action",
-        }),
+        flagged_df[display_cols].rename(
+            columns={
+                "status": "",
+                "name": "Name",
+                "deal_stage": "Stage",
+                "last_contact_days_ago": "Days Ago",
+                "property_interest": "Interest",
+                "budget": "Budget ($)",
+                "action": "Action",
+            }
+        ),
         use_container_width=True,
         hide_index=True,
     )
@@ -189,7 +224,7 @@ else:
     st.divider()
     st.subheader("Generate Email Drafts")
 
-    if not st.session_state.api_key:
+    if not api_key:
         st.error("Enter your Groq API key in the sidebar to generate drafts.")
     else:
         if "drafts" not in st.session_state:
@@ -197,19 +232,18 @@ else:
 
         if st.button("Generate All Drafts", type="primary"):
             progress = st.progress(0, text="Starting...")
-            for i, (_, row) in enumerate(flagged_df.iterrows()):
-                progress.progress(i / len(flagged_df), text=f"Drafting email for {row['name']}...")
+            for index, (_, row) in enumerate(flagged_df.iterrows(), start=1):
+                progress.progress(index / len(flagged_df), text=f"Drafting email for {row['name']}...")
                 with st.spinner(f"Writing email for {row['name']}..."):
-                    draft = stream_email(row)
+                    draft = stream_email(row, api_key)
                 st.session_state.drafts[row["name"]] = draft
                 save_draft(row["name"], draft)
-            progress.progress(1.0, text="Done!")
             st.success(f"Generated {len(flagged_df)} draft(s). Saved to drafts/")
 
         st.caption("Or generate drafts one at a time:")
         for _, row in flagged_df.iterrows():
             with st.expander(
-                f"{ACTION_BADGE.get(row['action'])} {row['name']} — "
+                f"{ACTION_BADGE.get(row['action'])} {row['name']} - "
                 f"{row['deal_stage']} ({int(row['last_contact_days_ago'])} days ago)"
             ):
                 col_a, col_b = st.columns([2, 1])
@@ -220,11 +254,11 @@ else:
                 with col_b:
                     if st.button("Draft Email", key=f"btn_{row['name']}"):
                         with st.spinner(f"Writing email for {row['name']}..."):
-                            draft = stream_email(row)
+                            draft = stream_email(row, api_key)
                         st.session_state.drafts[row["name"]] = draft
                         save_draft(row["name"], draft)
 
-                if row["name"] in st.session_state.get("drafts", {}):
+                if row["name"] in st.session_state.drafts:
                     draft_text = st.session_state.drafts[row["name"]]
                     st.text_area("Draft", value=draft_text, height=260, key=f"draft_{row['name']}")
                     st.download_button(
@@ -234,10 +268,10 @@ else:
                         key=f"dl_{row['name']}",
                     )
 
-# ── All contacts table ───────────────────────────────────────────────────────
-
 with st.expander("All Contacts"):
-    all_display = df[["status", "name", "deal_stage", "last_contact_days_ago", "property_interest", "budget"]].rename(
+    all_display = df[
+        ["status", "name", "deal_stage", "last_contact_days_ago", "property_interest", "budget"]
+    ].rename(
         columns={
             "status": "",
             "name": "Name",

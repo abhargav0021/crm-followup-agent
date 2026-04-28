@@ -1,6 +1,6 @@
 # CRM Follow-up Agent
 
-An AI agent that reads a CSV of real estate CRM contacts, flags who needs outreach based on inactivity rules, and drafts personalized emails using Groq (`llama-3.3-70b-versatile`).
+An AI agent that reads real estate CRM contacts from CSV, SQLite, or the local API, flags who needs outreach based on inactivity rules, and drafts personalized emails using Groq (`llama-3.3-70b-versatile`).
 
 ## Setup
 
@@ -16,10 +16,26 @@ cp .env.example .env          # then add your key
 ### CLI
 
 ```bash
-python agent.py
+python3 agent.py
 ```
 
 Prints a summary table of contacts needing action, then saves drafts to `drafts/`.
+
+### SQLite Seed
+
+```bash
+python3 database.py
+```
+
+The CLI, API, and Streamlit app also seed `crm.db` from `contacts.csv` automatically when the database is empty.
+
+### FastAPI
+
+```bash
+uvicorn api:app --reload
+```
+
+Serves contacts at `http://127.0.0.1:8000/contacts`.
 
 ### Streamlit UI
 
@@ -27,7 +43,22 @@ Prints a summary table of contacts needing action, then saves drafts to `drafts/
 streamlit run app.py
 ```
 
-Upload a CSV or use the included `contacts.csv`. Generate all drafts at once or one at a time with live streaming output.
+Upload a CSV, use the local FastAPI server, or fall back to the seeded SQLite database. Generate all drafts at once or one at a time with live streaming output.
+
+### Deploy to Streamlit Community Cloud
+
+1. Push this project to GitHub.
+2. Go to [share.streamlit.io](https://share.streamlit.io) and create a new app.
+3. Select your repository, branch, and set the main file path to `app.py`.
+4. Add this in **Advanced settings → Secrets**:
+
+```toml
+GROQ_API_KEY = "your_groq_api_key_here"
+```
+
+5. Deploy the app.
+
+On Streamlit Cloud, leave **Use local FastAPI server** unchecked. The deployed app can use an uploaded CSV or the included seeded data.
 
 ## Follow-up Rules
 
@@ -43,8 +74,11 @@ Upload a CSV or use the included `contacts.csv`. Generate all drafts at once or 
 ```
 crm-followup-agent/
 ├── agent.py          CLI script
+├── api.py            FastAPI contacts endpoint
 ├── app.py            Streamlit UI
 ├── contacts.csv      Sample CRM data (15 Tulsa OK contacts)
+├── database.py       SQLite setup and seed helpers
+├── scheduler.py      Daily automation runner
 ├── .env.example      API key template
 ├── .gitignore
 ├── requirements.txt
